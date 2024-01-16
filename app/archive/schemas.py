@@ -1,5 +1,4 @@
 from enum import StrEnum
-from uuid import UUID
 
 from pydantic import BaseModel, HttpUrl
 
@@ -9,17 +8,17 @@ class ArchiveIn(BaseModel):
 
 
 class ArchiveOut(BaseModel):
-    uuid: UUID
+    id: str
 
 
-class ArchiveStatuses(StrEnum):
+class ArchiveStatus(StrEnum):
     DOWNLOADING = 'downloading'
     UNPACKING = 'unpacking'
     COMPLETED = 'ok'
 
 
-class ArchiveStatus(BaseModel):
-    status: ArchiveStatuses
-    progress: int
+class ArchiveInfo(BaseModel):
+    status: ArchiveStatus
+    progress: int | None = None
     files: list[str] | None = None
 
