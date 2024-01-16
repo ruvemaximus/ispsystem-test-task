@@ -4,7 +4,7 @@ import tarfile
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from app.config import DOWNLOADS_DIR
 from .schemas import ArchiveIn, ArchiveOut, ArchiveStatuses, ArchiveStatus
@@ -13,7 +13,7 @@ router = APIRouter()
 archives = {}
 
 
-def get_file_list(destination_folder):
+def get_file_list(destination_folder: str):
     file_list = []
     for root, _, files in os.walk(destination_folder):
         for file in files:
@@ -62,7 +62,10 @@ async def download_archive(archive: ArchiveIn, background_tasks: BackgroundTasks
 
 @router.get('/{uuid}/', response_model=ArchiveStatus)
 async def get_archive_info(uuid: UUID):
-    a = archives[uuid]
+    try:
+        a = archives[uuid]
+    except KeyError:
+        return HTTPException(status_code=404, detail=f'Archive {uuid} not found!')
     return ArchiveStatus(
         status=a['status'],
         files=a.get('files'),
@@ -72,7 +75,10 @@ async def get_archive_info(uuid: UUID):
 
 @router.delete('/{uuid}/')
 async def delete_archive(uuid: UUID):
-    os.remove(DOWNLOADS_DIR / f'{uuid}.tar.gz')
+    try:
+        os.remove(DOWNLOADS_DIR / f'{uuid}.tar.gz')
+    except FileNotFoundError:
+        return HTTPException(status_code=404, detail=f'Archive {uuid} not found!')
     archives.pop(uuid)
     return {
         'ok': True,
