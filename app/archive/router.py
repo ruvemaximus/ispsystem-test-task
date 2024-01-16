@@ -47,7 +47,7 @@ async def unpack(_id: str):
     os.remove(DOWNLOADS_DIR / f'{_id}.tar.gz')
 
 
-async def download(url, _id):
+async def download(url: str, _id: str):
     async with httpx.AsyncClient() as ac:
         async with ac.stream('GET', url=url) as response:
             await archives_collection.find_one_and_update(
@@ -85,7 +85,7 @@ async def download_archive(archive: ArchiveIn, background_tasks: BackgroundTasks
     )
 
 
-@router.get('/{id}/', response_model=ArchiveInfo)
+@router.get('/{_id}/', response_model=ArchiveInfo)
 async def get_archive_info(_id: str):
     if (
             archive := await archives_collection.find_one({'_id': ObjectId(_id)})
@@ -99,7 +99,7 @@ async def get_archive_info(_id: str):
     ).model_dump(exclude_none=True)
 
 
-@router.delete('/{id}/')
+@router.delete('/{_id}/')
 async def delete_archive(_id: str):
     if archives.get(_id):
         archives.pop(_id)
