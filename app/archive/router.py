@@ -94,7 +94,7 @@ async def get_archive_info(_id: str):
 
     return ArchiveInfo(
         status=archive['status'],
-        files=archive['files'],
+        files=archive.get('files'),
         progress=int(archives[_id]['downloaded'] * 100 / archive['size']) if archives.get(_id) else None
     ).model_dump(exclude_none=True)
 
