@@ -27,7 +27,7 @@ from ..config import DOWNLOADS_DIR
 router = APIRouter()
 archives = {}
 
-# archive_manager_provider = MongoDBProvider("mongodb://root:example@localhost:27017/")
+# archive_manager_provider = MongoDBProvider("mongodb://root:example@mongo:27017/")
 archive_manager_provider = DictProvider()
 archive_manager = ArchiveManager(archive_manager_provider)
 
