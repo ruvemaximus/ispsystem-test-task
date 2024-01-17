@@ -13,6 +13,7 @@ from fastapi import (
     Form,
     File,
     Depends,
+    concurrency,
 )
 
 from .archive_manager import ArchiveManager
@@ -33,24 +34,41 @@ archive_manager = ArchiveManager(archive_manager_provider)
 
 def remove_archive_from_disk(_id: str):
     try:
-        shutil.rmtree(DOWNLOADS_DIR / _id)
         os.remove(DOWNLOADS_DIR / f"{_id}.tar.gz")
+        shutil.rmtree(DOWNLOADS_DIR / _id)
     except FileNotFoundError:
         pass
 
 
-async def unpack(_id: str):
-    await archive_manager.update(_id, {"status": ArchiveStatus.UNPACKING})
-
+def _extract_tar_process(_id: str, archive: dict):
     destination_folder = DOWNLOADS_DIR / _id
     files = []
+
+    with tarfile.open(DOWNLOADS_DIR / f"{_id}.tar.gz") as tar:
+        archive.update(
+            progress=0,
+            not_compressed_size=sum([member.size for member in tar.getmembers()]),
+        )
+
+        members = tar.getmembers()
+
+        for member in members:
+            files.append(member.name)
+            archive["progress"] += member.size
+            tar.extract(member, destination_folder)
+    return files
+
+
+async def unpack(_id: str):
     try:
-        with tarfile.open(DOWNLOADS_DIR / f"{_id}.tar.gz") as tar_gz_archive:
-            members = tar_gz_archive.getmembers()
-            for member in members:
-                files.append(member.name)
-                archives[_id]["progress"] += member.size
-                tar_gz_archive.extract(member, destination_folder)
+        await archive_manager.update(_id, {"status": ArchiveStatus.UNPACKING})
+        files = await concurrency.run_in_threadpool(
+            _extract_tar_process, _id, archives[_id]
+        )
+        await archive_manager.update(
+            _id, {"status": ArchiveStatus.COMPLETED, "files": files}
+        )
+
     except tarfile.ReadError:
         await archive_manager.update(
             _id,
@@ -59,12 +77,8 @@ async def unpack(_id: str):
                 "detail": "File is not .tar.gz archive!",
             },
         )
-        remove_archive_from_disk(_id)
-        return
+        await concurrency.run_in_threadpool(remove_archive_from_disk, _id)
 
-    await archive_manager.update(
-        _id, {"status": ArchiveStatus.COMPLETED, "files": files}
-    )
     archives.pop(_id)
 
 
@@ -106,8 +120,6 @@ async def download(url: str, _id: str):
             )
             return
 
-    await unpack(_id)
-
 
 @router.post("", response_model=ArchiveOut)
 async def download_archive(
@@ -121,17 +133,15 @@ async def download_archive(
 
     if url:
         _id = await archive_manager.create(url=url, author=current_user.model_dump())
-
         background_tasks.add_task(download, url, _id)
-
+        background_tasks.add_task(unpack, _id)
         return ArchiveOut(id=_id)
 
     if archive:
         _id = await archive_manager.create(author=current_user.model_dump())
-
         file_path = DOWNLOADS_DIR / f"{_id}.tar.gz"
-
         archives[_id] = {"progress": 0}
+
         await archive_manager.update(
             _id,
             {
@@ -144,8 +154,7 @@ async def download_archive(
             while chunk := await archive.read(1024):
                 await buffer.write(chunk)
 
-        await unpack(_id)
-
+        background_tasks.add_task(unpack, _id)
         return ArchiveOut(id=_id)
 
 
@@ -154,14 +163,27 @@ async def get_archive_info(_id: str, _: Annotated[User, Depends(get_current_user
     if (archive := await archive_manager.get(_id=_id)) is None:
         raise HTTPException(status_code=404, detail=f"Archive {_id} not found!")
 
+    match archive["status"]:
+        case ArchiveStatus.DOWNLOADING.value:
+            progress = int(archives[_id]["progress"] * 100 / archive["size"])
+        case ArchiveStatus.UNPACKING.value:
+            try:
+                progress = int(
+                    archives[_id]["progress"]
+                    * 100
+                    / archives[_id]["not_compressed_size"]
+                )
+            except KeyError:
+                progress = 0
+        case _:
+            progress = None
+
     return ArchiveInfo(
         status=archive["status"],
         author=archive["author"],
         files=archive.get("files"),
-        progress=int(archives[_id]["progress"] * 100 / archive["size"])
-        if archives.get(_id)
-        else None,
         detail=archive.get("detail"),
+        progress=progress,
     )
 
 
