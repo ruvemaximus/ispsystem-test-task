@@ -7,14 +7,15 @@ class DictProvider(BaseProvider):
     __data = {}
 
     @classmethod
-    async def create(cls, url: str) -> str:
+    async def create(cls, url: str | None = None) -> str:
         _id = str(uuid4())
         cls.__data[_id] = {"url": url}
         return _id
 
     @classmethod
     async def remove(cls, _id: str):
-        cls.__data.pop(_id)
+        if cls.__data.get(_id):
+            cls.__data.pop(_id)
 
     @classmethod
     async def update(cls, _id: str, data: dict):

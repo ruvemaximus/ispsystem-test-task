@@ -10,7 +10,7 @@ class MongoDBProvider(BaseProvider):
     __collection = __client.ispsystem_task.get_collection("archives")
 
     @classmethod
-    async def create(cls, url: str) -> str:
+    async def create(cls, url: str | None = None) -> str:
         new_archive = await cls.__collection.insert_one(
             {
                 "url": url,

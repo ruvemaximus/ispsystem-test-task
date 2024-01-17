@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 class BaseProvider(ABC):
     @classmethod
     @abstractmethod
-    def create(cls, url: str):
+    def create(cls, url: str | None = None):
         ...
 
     @classmethod

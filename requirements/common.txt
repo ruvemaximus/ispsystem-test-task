@@ -2,4 +2,5 @@ fastapi
 python-multipart
 uvicorn[standard]
 httpx
+aiofiles
 motor

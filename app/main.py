@@ -9,7 +9,7 @@ from . import config
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    Path.mkdir(config.DOWNLOADS_DIR, exist_ok=True)
+    config.DOWNLOADS_DIR.mkdir(exist_ok=True)
     yield
 
 
