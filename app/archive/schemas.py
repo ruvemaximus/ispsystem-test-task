@@ -2,6 +2,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, HttpUrl
 
+from app.auth.schemas import User
+
 
 class ArchiveIn(BaseModel):
     url: HttpUrl
@@ -20,6 +22,7 @@ class ArchiveStatus(StrEnum):
 
 class ArchiveInfo(BaseModel):
     status: ArchiveStatus
+    author: User
     progress: int | None = None
     files: list[str] | None = None
     detail: str | None = None

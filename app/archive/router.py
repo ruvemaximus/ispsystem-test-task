@@ -5,17 +5,28 @@ from typing import Annotated
 
 import aiofiles
 import httpx
-from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, Form, File
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    HTTPException,
+    UploadFile,
+    Form,
+    File,
+    Depends,
+)
 
 from .archive_manager import ArchiveManager
 from .providers import DictProvider
+
 # from .providers import MongoDBProvider
 from .schemas import ArchiveOut, ArchiveInfo, ArchiveStatus
+from ..auth.router import get_current_user, User
 from ..config import DOWNLOADS_DIR
 
 router = APIRouter()
 archives = {}
 
+# archive_manager_provider = MongoDBProvider("mongodb://root:example@localhost:27017/")
 archive_manager_provider = DictProvider()
 archive_manager = ArchiveManager(archive_manager_provider)
 
@@ -54,7 +65,7 @@ async def unpack(_id: str):
     await archive_manager.update(
         _id, {"status": ArchiveStatus.COMPLETED, "files": files}
     )
-    await archives.pop(_id)
+    archives.pop(_id)
 
 
 async def download(url: str, _id: str):
@@ -71,7 +82,7 @@ async def download(url: str, _id: str):
                 )
 
                 async with aiofiles.open(
-                        DOWNLOADS_DIR / f"{_id}.tar.gz", "wb"
+                    DOWNLOADS_DIR / f"{_id}.tar.gz", "wb"
                 ) as archive_file:
                     async for chunk in response.aiter_bytes():
                         archives[_id]["progress"] += len(chunk)
@@ -99,23 +110,24 @@ async def download(url: str, _id: str):
 
 
 @router.post("", response_model=ArchiveOut)
-async def download_archive_by_url(
-        background_tasks: BackgroundTasks,
-        url: Annotated[str, Form()] = None,
-        archive: Annotated[UploadFile, File(...)] = None,
+async def download_archive(
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[User, Depends(get_current_user)],
+    url: Annotated[str, Form()] = None,
+    archive: Annotated[UploadFile, File(...)] = None,
 ):
     if url is None and archive is None:
-        raise HTTPException(400, "Url OR Archive is required!")
+        raise HTTPException(400, "Url OR archive file is required!")
 
     if url:
-        _id = await archive_manager.create(url)
+        _id = await archive_manager.create(url=url, author=current_user.model_dump())
 
         background_tasks.add_task(download, url, _id)
 
         return ArchiveOut(id=_id)
 
     if archive:
-        _id = await archive_manager.create()
+        _id = await archive_manager.create(author=current_user.model_dump())
 
         file_path = DOWNLOADS_DIR / f"{_id}.tar.gz"
 
@@ -138,12 +150,13 @@ async def download_archive_by_url(
 
 
 @router.get("/{_id}/", response_model=ArchiveInfo, response_model_exclude_none=True)
-async def get_archive_info(_id: str):
+async def get_archive_info(_id: str, _: Annotated[User, Depends(get_current_user)]):
     if (archive := await archive_manager.get(_id=_id)) is None:
         raise HTTPException(status_code=404, detail=f"Archive {_id} not found!")
 
     return ArchiveInfo(
         status=archive["status"],
+        author=archive["author"],
         files=archive.get("files"),
         progress=int(archives[_id]["progress"] * 100 / archive["size"])
         if archives.get(_id)
@@ -153,7 +166,11 @@ async def get_archive_info(_id: str):
 
 
 @router.delete("/{_id}/")
-async def delete_archive(_id: str, background_tasks: BackgroundTasks):
+async def delete_archive(
+    _id: str,
+    background_tasks: BackgroundTasks,
+    _: Annotated[User, Depends(get_current_user)],
+):
     if archives.get(_id):
         archives.pop(_id)
 

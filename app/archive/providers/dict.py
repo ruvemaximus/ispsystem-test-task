@@ -1,15 +1,16 @@
 from uuid import uuid4
 
 from .base import BaseProvider
+from ...auth.schemas import User
 
 
 class DictProvider(BaseProvider):
     __data = {}
 
     @classmethod
-    async def create(cls, url: str | None = None) -> str:
+    async def create(cls, author: User, url: str | None = None) -> str:
         _id = str(uuid4())
-        cls.__data[_id] = {"url": url}
+        cls.__data[_id] = {"url": url, "author": author}
         return _id
 
     @classmethod

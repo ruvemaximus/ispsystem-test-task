@@ -1,10 +1,12 @@
 from abc import ABC, abstractmethod
 
+from app.auth.schemas import User
+
 
 class BaseProvider(ABC):
     @classmethod
     @abstractmethod
-    def create(cls, url: str | None = None):
+    def create(cls, author: User, url: str | None = None):
         ...
 
     @classmethod
