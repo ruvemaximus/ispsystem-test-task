@@ -3,21 +3,20 @@ import shutil
 import tarfile
 
 import httpx
-import motor.motor_asyncio
-from bson import ObjectId
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
+from .archive_manager import ArchiveManager
+from .providers import DictProvider
+
+# from .providers import MongoDBProvider
 from .schemas import ArchiveIn, ArchiveOut, ArchiveInfo, ArchiveStatus
 from ..config import DOWNLOADS_DIR
 
 router = APIRouter()
 archives = {}
 
-client = motor.motor_asyncio.AsyncIOMotorClient(
-    "mongodb://root:example@localhost:27017/"
-)
-db = client.ispsystem_task
-archives_collection = db.get_collection("archives")
+archive_manager_provider = DictProvider()
+archive_manager = ArchiveManager(archive_manager_provider)
 
 
 def get_file_list(_id: str):
@@ -31,30 +30,25 @@ def get_file_list(_id: str):
 
 
 async def unpack(_id: str):
-    await archives_collection.find_one_and_update(
-        {"_id": ObjectId(_id)}, {"$set": {"status": ArchiveStatus.UNPACKING}}
-    )
+    await archive_manager.update(_id, {"status": ArchiveStatus.UNPACKING})
 
     destination_folder = DOWNLOADS_DIR / _id
     try:
         with tarfile.open(DOWNLOADS_DIR / f"{_id}.tar.gz") as tar_gz_archive:
             tar_gz_archive.extractall(destination_folder)
     except tarfile.ReadError:
-        await archives_collection.find_one_and_update(
-            {"_id": ObjectId(_id)},
+        await archive_manager.update(
+            _id,
             {
-                "$set": {
-                    "detail": "File is not .tar.gz archive!",
-                    "status": ArchiveStatus.FAILED,
-                }
+                "status": ArchiveStatus.FAILED,
+                "detail": "File is not .tar.gz archive!",
             },
         )
         os.remove(DOWNLOADS_DIR / f"{_id}.tar.gz")
         return
 
-    await archives_collection.find_one_and_update(
-        {"_id": ObjectId(_id)},
-        {"$set": {"files": get_file_list(_id), "status": ArchiveStatus.COMPLETED}},
+    await archive_manager.update(
+        _id, {"status": ArchiveStatus.COMPLETED, "files": get_file_list(_id)}
     )
 
     shutil.rmtree(destination_folder)
@@ -66,13 +60,11 @@ async def download(url: str, _id: str):
         try:
             async with ac.stream("GET", url=url) as response:
                 archives[_id] = {"downloaded": 0}
-                await archives_collection.find_one_and_update(
-                    {"_id": ObjectId(_id)},
+                await archive_manager.update(
+                    _id,
                     {
-                        "$set": {
-                            "size": int(response.headers.get("content-length")),
-                            "status": ArchiveStatus.DOWNLOADING,
-                        }
+                        "size": int(response.headers.get("content-length")),
+                        "status": ArchiveStatus.DOWNLOADING,
                     },
                 )
 
@@ -81,24 +73,20 @@ async def download(url: str, _id: str):
                         archives[_id]["downloaded"] += len(chunk)
                         archive_file.write(chunk)
         except httpx.ConnectError as e:
-            await archives_collection.find_one_and_update(
-                {"_id": ObjectId(_id)},
+            await archive_manager.update(
+                _id,
                 {
-                    "$set": {
-                        "detail": f"Failed to connect {url}: {e}!",
-                        "status": ArchiveStatus.FAILED,
-                    }
+                    "status": ArchiveStatus.FAILED,
+                    "detail": f"Failed to connect {url}: {e}!",
                 },
             )
             return
         except httpx.ConnectTimeout:
-            await archives_collection.find_one_and_update(
-                {"_id": ObjectId(_id)},
+            await archive_manager.update(
+                _id,
                 {
-                    "$set": {
-                        "detail": f"Connection to {url} timed out!",
-                        "status": ArchiveStatus.FAILED,
-                    }
+                    "status": ArchiveStatus.FAILED,
+                    "detail": f"Connection to {url} timed out!",
                 },
             )
             return
@@ -111,13 +99,7 @@ async def download(url: str, _id: str):
 async def download_archive_by_url(
     archive: ArchiveIn, background_tasks: BackgroundTasks
 ):
-    new_archive = await archives_collection.insert_one(
-        {
-            "url": str(archive.url),
-        }
-    )
-
-    _id = str(new_archive.inserted_id)
+    _id = await archive_manager.create(str(archive.url))
 
     background_tasks.add_task(download, str(archive.url), _id)
     return ArchiveOut(id=_id)
@@ -125,7 +107,7 @@ async def download_archive_by_url(
 
 @router.get("/{_id}/", response_model=ArchiveInfo, response_model_exclude_none=True)
 async def get_archive_info(_id: str):
-    if (archive := await archives_collection.find_one({"_id": ObjectId(_id)})) is None:
+    if (archive := await archive_manager.get(_id=_id)) is None:
         raise HTTPException(status_code=404, detail=f"Archive {_id} not found!")
 
     return ArchiveInfo(
@@ -142,5 +124,7 @@ async def get_archive_info(_id: str):
 async def delete_archive(_id: str):
     if archives.get(_id):
         archives.pop(_id)
-    await archives_collection.delete_one({"_id": ObjectId(_id)})
+
+    await archive_manager.remove(_id=_id)
+
     return {"ok": True, "message": f"Archive {_id} successfully removed!"}
