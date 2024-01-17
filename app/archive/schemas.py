@@ -12,13 +12,14 @@ class ArchiveOut(BaseModel):
 
 
 class ArchiveStatus(StrEnum):
-    DOWNLOADING = 'downloading'
-    UNPACKING = 'unpacking'
-    COMPLETED = 'ok'
+    DOWNLOADING = "downloading"
+    UNPACKING = "unpacking"
+    FAILED = "failed"
+    COMPLETED = "ok"
 
 
 class ArchiveInfo(BaseModel):
     status: ArchiveStatus
     progress: int | None = None
     files: list[str] | None = None
-
+    detail: str | None = None
